@@ -1,0 +1,15 @@
+{
+  "name": "angel-one-ws",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "node-fetch": "^2.7.0",
+    "smartapi-javascript": "^1.0.27",
+    "ws": "^8.18.3"
+  }
+}
