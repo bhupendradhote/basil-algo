@@ -4,10 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Services\AngelOneService;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 
 class AngelController extends Controller
 {
-public function login(Request $request, AngelOneService $angel)
+    public function login(Request $request, AngelOneService $angel): JsonResponse
     {
         $data = $angel->login();
 
@@ -16,13 +17,11 @@ public function login(Request $request, AngelOneService $angel)
         return response()->json([
             'jwt'    => session('jwt'),
             'feed'   => session('feed'),
-            'symbol' => $symbol, // Correct key => value syntax
+            'symbol' => $symbol,
         ]);
-
-        console.log('Login Data:', $data, 'symbol:', $symbol);
     }
 
-    public function history(Request $request, AngelOneService $angel)
+    public function history(Request $request, AngelOneService $angel): JsonResponse
     {
         $symbol = $request->query('symbol', config('services.angel.default_symbol', '99926000'));
         $interval = strtoupper($request->query('interval', 'FIFTEEN_MINUTE'));
@@ -61,7 +60,7 @@ public function login(Request $request, AngelOneService $angel)
         return view('dashboard');
     }
 
-    public function wsToken(AngelOneService $angel)
+    public function wsToken(AngelOneService $angel): JsonResponse
     {
         if (!session()->has('jwt') || !session()->has('feed')) {
             $angel->login(); // force login
@@ -75,4 +74,43 @@ public function login(Request $request, AngelOneService $angel)
         ]);
     }
 
+    public function quote(Request $request, AngelOneService $angel): JsonResponse
+    {
+        $single = $request->query('symbol');
+        $multi = $request->query('symbols');
+
+        $mode = $request->query('mode', 'FULL');
+
+        $symbols = [];
+
+        if (!empty($multi)) {
+            if (is_array($multi)) {
+                $symbols = $multi;
+            } else {
+                $symbols = array_filter(array_map('trim', explode(',', (string)$multi)));
+            }
+        } elseif (!empty($single)) {
+            $symbols = [trim((string)$single)];
+        } else {
+            // fallback to default single symbol from config
+            $symbols = [config('services.angel.default_symbol', '99926000')];
+        }
+
+        if (!session('jwt')) {
+            $angel->login();
+        }
+
+        $res = $angel->quote($symbols, $mode);
+
+        if (empty($res['status']) || !$res['status']) {
+            $statusCode = 400;
+            return response()->json($res, $statusCode);
+        }
+
+        return response()->json([
+            'status' => true,
+            'message' => $res['message'] ?? 'OK',
+            'data' => $res['data'],
+        ]);
+    }
 }

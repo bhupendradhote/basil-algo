@@ -6,13 +6,14 @@ use GuzzleHttp\Client;
 use OTPHP\TOTP;
 use DateTime;
 use DateTimeZone;
-use DateInterval;
 use Exception;
+use Psr\Http\Message\ResponseInterface;
 
 class AngelOneService
 {
     private Client $client;
     private string $baseUrl = "https://apiconnect.angelbroking.com";
+    private string $marketBaseUrl = "https://apiconnect.angelone.in"; // quote endpoint base
     private DateTimeZone $tz;
 
     public function __construct()
@@ -25,7 +26,13 @@ class AngelOneService
         $this->tz = new DateTimeZone('Asia/Kolkata');
     }
 
-    public function login()
+    /**
+     * Login and store JWT/feed tokens in session.
+     *
+     * @return array
+     * @throws Exception
+     */
+    public function login(): array
     {
         $totp = TOTP::create(config('services.angel.totp_secret'))->now();
 
@@ -51,10 +58,10 @@ class AngelOneService
             ]
         );
 
-        $data = json_decode($response->getBody(), true);
+        $data = json_decode($response->getBody()->getContents(), true);
 
         if (empty($data['status']) || !$data['status']) {
-            throw new \Exception($data['message'] ?? 'Angel login failed');
+            throw new Exception($data['message'] ?? 'Angel login failed');
         }
 
         session([
@@ -179,7 +186,7 @@ class AngelOneService
                     ]
                 );
 
-                $raw = json_decode($response->getBody(), true);
+                $raw = json_decode($response->getBody()->getContents(), true);
 
                 if (empty($raw) || !isset($raw['status']) || !$raw['status']) {
                     return [
@@ -260,4 +267,91 @@ class AngelOneService
             ];
         }
     }
+
+
+public function quote($symbols, string $mode = 'FULL', string $exchange = 'NSE'): array
+{
+    // Normalize symbols to array
+    if (!is_array($symbols)) {
+        $symbols = [$symbols];
+    }
+
+    $symbols = array_values(array_filter(array_map('strval', $symbols)));
+
+    if (empty($symbols)) {
+        return [
+            'status' => false,
+            'message' => 'No symbol tokens provided',
+            'data' => null,
+        ];
+    }
+
+    // Ensure JWT
+    if (!session('jwt')) {
+        try {
+            $this->login();
+        } catch (Exception $e) {
+            return [
+                'status' => false,
+                'message' => 'Login failed: ' . $e->getMessage(),
+                'data' => null,
+            ];
+        }
+    }
+
+    $payload = [
+        'mode' => strtoupper($mode),
+        'exchangeTokens' => [
+            strtoupper($exchange) => $symbols
+        ]
+    ];
+
+    try {
+        $response = $this->client->post(
+            "{$this->marketBaseUrl}/rest/secure/angelbroking/market/v1/quote/",
+            [
+                'headers' => [
+                    'X-PrivateKey' => config('services.angel.api_key'),
+                    'X-UserType' => 'USER',
+                    'X-SourceID' => 'WEB',
+                    'Authorization' => 'Bearer ' . session('jwt'),
+                    'Content-Type' => 'application/json',
+                    'Accept' => 'application/json',
+                    'X-ClientLocalIP' => '127.0.0.1',
+                    'X-ClientPublicIP' => '127.0.0.1',
+                    'X-MACAddress' => '00:00:00:00:00:00',
+                ],
+                'json' => $payload,
+                'http_errors' => false,
+                'timeout' => 20,
+            ]
+        );
+
+        $raw = json_decode($response->getBody()->getContents(), true);
+
+        if (!isset($raw['status']) || !$raw['status']) {
+            return [
+                'status' => false,
+                'message' => $raw['message'] ?? 'Quote API error',
+                'errorcode' => $raw['errorcode'] ?? null,
+                'raw' => $raw,
+                'data' => null,
+            ];
+        }
+
+        return [
+            'status' => true,
+            'message' => 'SUCCESS',
+            'data' => $raw['data'],
+        ];
+
+    } catch (Exception $e) {
+        return [
+            'status' => false,
+            'message' => 'Exception: ' . $e->getMessage(),
+            'data' => null,
+        ];
+    }
+}
+
 }
